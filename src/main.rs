@@ -2,33 +2,56 @@ mod buffer;
 mod glyph;
 mod reader;
 mod renderer;
+mod table;
 mod utils;
 
-use reader::{read_table_directory, read_loca_format, read_glyph_offsets, read_total_glyphs, read_glyph};
+use reader::{FontParser, read_table_directory};
 use utils::read_file_to_byte_array;
 use buffer::ByteBuffer;
 use renderer::AppState;
-
-use sdl2::event::Event;
+use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
-use sdl2::pixels::Color;
+use sdl2::mouse::MouseButton;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
 use sdl2::Sdl;
+use std::env;
 
 fn main() -> Result<(), String> {
+    // Read the input string from command line arguments
+    let args: Vec<String> = env::args().collect();
+    let input_string = if args.len() > 1 {
+        &args[1]
+    } else {
+        "Hello, World!"
+    };
+
     let file_path = "fonts/JetBrainsMono-Regular.ttf";
     let bytes = read_file_to_byte_array(file_path);
     let mut byte_buffer = ByteBuffer::new(bytes);
 
     let table_records = read_table_directory(&mut byte_buffer);
-    let loca_format = read_loca_format(&mut byte_buffer, &table_records).expect("head table not found");
-    let total_glyphs = read_total_glyphs(&mut byte_buffer, &table_records).expect("maxp table not found");
-    let glyph_offsets = read_glyph_offsets(&mut byte_buffer, &table_records, total_glyphs, loca_format);
+    let mut parser = FontParser::new(byte_buffer, table_records);
 
+    let head_table = parser.read_head_table().expect("head table not found");
+    let maxp_table = parser.read_maxp_table().expect("maxp table not found");
+    let total_glyphs = maxp_table.num_glyphs;
+    let glyph_offsets = parser.read_glyph_offsets(total_glyphs, head_table.index_to_loc_format);
+    let cmap_table = parser.read_cmap_table().expect("cmap table not found");
+    let cmap_subtable = parser.read_cmap_subtable(&cmap_table).expect("cmap subtable not found");
+
+    // Convert input string to glyph indices
+    let mut glyph_indices = Vec::new();
+    for ch in input_string.chars() {
+        if let Some(glyph_index) = cmap_subtable.char_to_glyph_index(ch as u16) {
+            glyph_indices.push(glyph_index);
+        }
+    }
+
+    // Generate glyphs for the renderer
     let mut glyphs = Vec::new();
-    for i in 0..total_glyphs {
-        if let Some(glyph_data) = read_glyph(&mut byte_buffer, &table_records, glyph_offsets.clone(), i) {
+    for glyph_index in glyph_indices {
+        if let Some(glyph_data) = parser.read_glyph(glyph_offsets.clone(), glyph_index) {
             glyphs.push(glyph_data);
         }
     }
@@ -50,24 +73,37 @@ fn main() -> Result<(), String> {
     let mut app_state = AppState::new(glyphs, width, height)?;
 
     'running: loop {
+        let mouse_state = event_pump.mouse_state();
+        let (mouse_x, mouse_y) = (mouse_state.x(), mouse_state.y());
+
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } |
                 Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
                     break 'running
                 },
-                Event::KeyDown { keycode: Some(Keycode::Up), .. } => {
-                    app_state.zoom_in();
-                }
-                Event::KeyDown { keycode: Some(Keycode::Down), .. } => {
-                    app_state.zoom_out();
-                }
-                Event::KeyDown { keycode: Some(Keycode::Left), .. } => {
-                    app_state.previous_glyph();
-                }
-                Event::KeyDown { keycode: Some(Keycode::Right), .. } => {
-                    app_state.next_glyph();
-                }
+                Event::MouseWheel { y, .. } => {
+                    if y > 0 {
+                        app_state.zoom(true, mouse_x, mouse_y);
+                    } else if y < 0 {
+                        app_state.zoom(false, mouse_x, mouse_y);
+                    }
+                },
+                Event::MouseButtonDown { x, y, mouse_btn, .. } => {
+                    if mouse_btn == MouseButton::Left {
+                        app_state.start_drag(x, y);
+                    }
+                },
+                Event::MouseButtonUp { mouse_btn, .. } => {
+                    if mouse_btn == MouseButton::Left {
+                        app_state.end_drag();
+                    }
+                },
+                Event::MouseMotion { x, y, mousestate, .. } => {
+                    if mousestate.left() {
+                        app_state.update_drag(x, y);
+                    }
+                },
                 _ => {}
             }
         }

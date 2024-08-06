@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 byteorder = "1.4"
 rand = "0.8"
+sys-info = "0.8"
 
 [dependencies.sdl2]
 version = "0.35.2"
