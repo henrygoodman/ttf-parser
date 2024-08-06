@@ -64,6 +64,7 @@ fn main() -> Result<(), String> {
     let window: Window = video_subsystem
         .window("Glyph Renderer", width as u32, height as u32)
         .position_centered()
+        .resizable()
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -102,6 +103,11 @@ fn main() -> Result<(), String> {
                 Event::MouseMotion { x, y, mousestate, .. } => {
                     if mousestate.left() {
                         app_state.update_drag(x, y);
+                    }
+                },
+                Event::Window { win_event, .. } => {
+                    if let WindowEvent::Resized(width, height) = win_event {
+                        app_state.update_canvas_dimensions(width as i16, height as i16);
                     }
                 },
                 _ => {}

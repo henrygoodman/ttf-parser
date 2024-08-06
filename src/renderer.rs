@@ -31,6 +31,11 @@ impl AppState {
         })
     }
 
+    pub fn update_canvas_dimensions(&mut self, width: i16, height: i16) {
+        self.canvas_dimensions.width = width;
+        self.canvas_dimensions.height = height;
+    }
+
     pub fn zoom(&mut self, zoom_in: bool, mouse_x: i32, mouse_y: i32) {
         let zoom_factor = if zoom_in { 1.1 } else { 0.9 };
         let old_zoom_level = self.zoom_level;
