@@ -20,14 +20,15 @@ use std::env;
 fn main() -> Result<(), String> {
     // Read the input string from command line arguments
     let args: Vec<String> = env::args().collect();
+    let font_name = String::from("JetBrainsMono-ExtraBold.ttf");
     let input_string = if args.len() > 1 {
-        &args[1]
+        args[1].clone()
     } else {
-        "Hello, World!"
+        font_name.clone()
     };
 
-    let file_path = "fonts/JetBrainsMono-Bold.ttf";
-    let bytes = read_file_to_byte_array(file_path);
+    let file_path = format!("fonts/{}", font_name);
+    let bytes = read_file_to_byte_array(&file_path);
     let mut byte_buffer = ByteBuffer::new(bytes);
 
     let table_records = read_table_directory(&mut byte_buffer);
