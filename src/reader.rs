@@ -1,5 +1,5 @@
 use crate::buffer::ByteBuffer;
-use crate::Glyph;
+use crate::glyph::Glyph;
 
 #[derive(Debug)]
 pub struct TableRecord {
