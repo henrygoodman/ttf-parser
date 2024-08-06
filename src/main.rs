@@ -26,7 +26,7 @@ fn main() -> Result<(), String> {
         "Hello, World!"
     };
 
-    let file_path = "fonts/JetBrainsMono-Regular.ttf";
+    let file_path = "fonts/JetBrainsMono-Bold.ttf";
     let bytes = read_file_to_byte_array(file_path);
     let mut byte_buffer = ByteBuffer::new(bytes);
 
