@@ -20,7 +20,7 @@ use std::env;
 fn main() -> Result<(), String> {
     // Read the input string from command line arguments
     let args: Vec<String> = env::args().collect();
-    let font_name = String::from("JetBrainsMono-ExtraBold.ttf");
+    let font_name = String::from("JetBrainsMono-Regular.ttf");
     let input_string = if args.len() > 1 {
         args[1].clone()
     } else {
@@ -41,20 +41,30 @@ fn main() -> Result<(), String> {
     let cmap_table = parser.read_cmap_table().expect("cmap table not found");
     let cmap_subtable = parser.read_cmap_subtable(&cmap_table).expect("cmap subtable not found");
 
-    // Convert input string to glyph indices
-    let mut glyph_indices = Vec::new();
+    let mut lines = vec![];
+    let mut current_line = vec![];
     for ch in input_string.chars() {
-        if let Some(glyph_index) = cmap_subtable.char_to_glyph_index(ch as u16) {
-            glyph_indices.push(glyph_index);
+        if ch == '\n' {
+            lines.push(current_line);
+            current_line = vec![];
+        } else if let Some(glyph_index) = cmap_subtable.char_to_glyph_index(ch as u16) {
+            current_line.push(glyph_index);
         }
+    }
+    if !current_line.is_empty() {
+        lines.push(current_line);
     }
 
     // Generate glyphs for the renderer
-    let mut glyphs = Vec::new();
-    for glyph_index in glyph_indices {
-        if let Some(glyph_data) = parser.read_glyph(glyph_offsets.clone(), glyph_index) {
-            glyphs.push(glyph_data);
+    let mut glyphs = vec![];
+    for line in lines {
+        let mut glyph_line = vec![];
+        for glyph_index in line {
+            if let Some(glyph_data) = parser.read_glyph(glyph_offsets.clone(), glyph_index) {
+                glyph_line.push(glyph_data);
+            }
         }
+        glyphs.push(glyph_line);
     }
 
     let sdl_context: Sdl = sdl2::init()?;
