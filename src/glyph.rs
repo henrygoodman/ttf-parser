@@ -8,4 +8,6 @@ pub struct Glyph {
     pub end_pts_of_contours: Vec<u16>,
     pub x_coordinates: Vec<i16>,
     pub y_coordinates: Vec<i16>,
+    pub flags: Vec<u8>,
+    pub processed_points: Vec<(i16, i16)>
 }

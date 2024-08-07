@@ -9,6 +9,7 @@ pub struct AppState {
     glyphs: Vec<Vec<Glyph>>,
     canvas_dimensions: Dimensions,
     zoom_level: f64,
+    debug: bool, // Enables debug vizuals
     drag_start: Option<(i32, i32)>,
     offset: (f64, f64),
     padding: f64,
@@ -21,15 +22,16 @@ struct Dimensions {
 }
 
 impl AppState {
-    pub fn new(glyphs: Vec<Vec<Glyph>>, width: i16, height: i16) -> Result<Self, String> {
+    pub fn new(glyphs: Vec<Vec<Glyph>>, width: i16, height: i16, debug: bool) -> Result<Self, String> {
         Ok(AppState {
             glyphs,
             canvas_dimensions: Dimensions { width, height },
+            debug: debug,
             zoom_level: 1.0,
             drag_start: None,
             offset: (0.0, 0.0),
-            padding: 10.0,          // FIXME: Get proper horizontal spacing
-            line_height: 1000.0,    // FIXME: Get proper vertical spacing
+            padding: 10.0,
+            line_height: 1000.0,
         })
     }
 
@@ -42,10 +44,7 @@ impl AppState {
         let zoom_factor = if zoom_in { 1.1 } else { 0.9 };
         self.zoom_level *= zoom_factor;
 
-        // Calculate the offset change to keep the zoom centered around the mouse position
         let (mouse_x, mouse_y) = (mouse_x as f64, mouse_y as f64);
-
-        // Adjust offset relative to the mouse position and zoom level
         let dx = (mouse_x - self.offset.0) * (1.0 - zoom_factor);
         let dy = (mouse_y - self.offset.1) * (1.0 - zoom_factor);
 
@@ -79,11 +78,37 @@ impl AppState {
         (min_x, max_x, min_y, max_y)
     }
 
+    fn draw_bezier(&self, canvas: &mut Canvas<Window>, points: &[(i16, i16)], color: Color) -> Result<(), String> {
+        if points.len() < 3 {
+            return Err("Need at least 3 points to draw a quadratic Bézier curve".into());
+        }
+    
+        for i in (0..points.len() - 1).step_by(2) {
+            let p0 = points[i];
+            let p1 = points[(i + 1) % points.len()];
+            let p2 = points[(i + 2) % points.len()];
+    
+            let vx = [p0.0, p1.0, p2.0];
+            let vy = [p0.1, p1.1, p2.1];
+    
+            canvas.bezier(&vx, &vy, 3, color)?;
+            
+            // Draw circles at each control point for debugging
+            if (self.debug) {
+                canvas.filled_circle(vx[0] as i16, vy[0] as i16, (10.0 * self.zoom_level) as i16, Color::RGB(255, 0, 0))?;
+                canvas.filled_circle(vx[1] as i16, vy[1] as i16, (5.0 * self.zoom_level) as i16, Color::RGB(0, 255, 0))?;
+                canvas.filled_circle(vx[2] as i16, vy[2] as i16, (2.0 * self.zoom_level) as i16, Color::RGB(0, 0, 255))?;
+            }
+        }
+    
+        Ok(())
+    }
+    
     pub fn render(&mut self, canvas: &mut Canvas<Window>) -> Result<(), String> {
         // Clear the canvas with a black background
         canvas.set_draw_color(Color::RGB(0, 0, 0));
         canvas.clear();
-
+    
         // Colors for different contours
         let colors = [
             Color::RGB(255, 255, 255),  // White
@@ -93,74 +118,58 @@ impl AppState {
             Color::RGB(138, 43, 226),   // Blue Violet
             Color::RGB(255, 20, 147),   // Deep Pink
         ];
-
-        // Determine the overall glyph height to maintain baseline alignment
+    
         let max_y_coord = self.glyphs.iter().flatten().map(|glyph| {
             let (_, _, _, max_y) = self.get_glyph_bounding_box(glyph);
             max_y as f64
         }).max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(0.0);
-
-        // Determine the fixed width for all glyphs based on the widest glyph
+    
         let fixed_width = self.glyphs.iter().flatten().map(|glyph| {
             let (min_x, max_x, _, _) = self.get_glyph_bounding_box(glyph);
             (max_x - min_x) as f64
         }).max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(0.0);
-
-        // Draw glyphs
+    
         let mut pen_y = self.offset.1;
         for line in &self.glyphs {
             let mut pen_x = self.offset.0;
-
+    
             for glyph in line {
-                // Get bounding box for the glyph
                 let (min_x, max_x, min_y, max_y) = self.get_glyph_bounding_box(glyph);
-
-                // Calculate the glyph's width and height
+    
                 let glyph_width = (max_x - min_x) as f64;
                 let glyph_height = (max_y - min_y) as f64;
-
-                // Calculate baseline for the current glyph
+    
                 let baseline = pen_y + (max_y_coord - max_y as f64) * self.zoom_level;
-
-                // Debug: Output the dimensions and position of the glyph
-                // println!("Glyph dimensions: width = {}, height = {}", glyph_width, glyph_height);
-                // println!("Glyph position: pen_x = {}, baseline = {}", pen_x, baseline);
-                // println!("{:?}", glyph);
-
-                // Scale coordinates by zoom level
+    
+                if (self.debug) {
+                    println!("Glyph dimensions: width = {}, height = {}", glyph_width, glyph_height);
+                    println!("Glyph position: pen_x = {}, baseline = {}", pen_x, baseline);
+                    println!("{:?}", glyph);
+                }
+    
                 let scale = |x: i16| -> i16 { (x as f64 * self.zoom_level) as i16 };
                 let flip_y = |y: i16| -> i16 { (y as f64 * self.zoom_level) as i16 };
-
-                // Draw contours with different colors
+    
+                let mut points = Vec::new();
+                for &(x, y) in &glyph.processed_points {
+                    let scaled_x = (pen_x + scale(x - min_x) as f64) as i16;
+                    let scaled_y = (baseline - flip_y(y - max_y) as f64) as i16;
+                    points.push((scaled_x, scaled_y));
+                }
+    
                 let mut start = 0;
                 for (contour_index, &end) in glyph.end_pts_of_contours.iter().enumerate() {
                     let color = colors[contour_index % colors.len()];
-                    for i in start..end {
-                        let x1 = (pen_x + scale(glyph.x_coordinates[i as usize] - min_x) as f64) as i16;
-                        let y1 = (baseline - flip_y(glyph.y_coordinates[i as usize] - max_y) as f64) as i16;
-                        let x2 = (pen_x + scale(glyph.x_coordinates[(i + 1) as usize] - min_x) as f64) as i16;
-                        let y2 = (baseline - flip_y(glyph.y_coordinates[(i + 1) as usize] - max_y) as f64) as i16;
-                        canvas.line(x1, y1, x2, y2, color).unwrap();
-                    }
-                    // Close the contour
-                    let x1 = (pen_x + scale(glyph.x_coordinates[end as usize] - min_x) as f64) as i16;
-                    let y1 = (baseline - flip_y(glyph.y_coordinates[end as usize] - max_y) as f64) as i16;
-                    let x2 = (pen_x + scale(glyph.x_coordinates[start as usize] - min_x) as f64) as i16;
-                    let y2 = (baseline - flip_y(glyph.y_coordinates[start as usize] - max_y) as f64) as i16;
-                    canvas.line(x1, y1, x2, y2, color).unwrap();
-
+                    self.draw_bezier(canvas, &points[start as usize..=end as usize], color)?;
                     start = end + 1;
                 }
-
-                // Move pen to the next glyph position with padding
+    
                 pen_x += (fixed_width + self.padding) * self.zoom_level;
             }
-
-            // Move pen to the next line
+    
             pen_y += (self.line_height + self.padding) * self.zoom_level;
         }
-
-        // Present the updated canvas
+    
         canvas.present();
         Ok(())
     }

@@ -1,5 +1,8 @@
 # ttf-parser
 
+![](img/bezier_far.png)
+
+
 ### Personal project to learn ttf parsing in Rust
 
 (Using JetBrainsMono-Regular to test)
@@ -19,9 +22,17 @@
 
     ![](img/hello_world.png)
 
+3. Using Bezier Curves
+
+    ![](img/bezier_close.png)
+
+    ![](img/bezier_far.png)
+
+
+
 ## TODO
 - Fix some glyph data showing weird (space is showing as 'H')
 - Handle compound glyphs
 - Improve spacing
-- Render outline using bezier data
 - Render glyphs totally (filling inside)
+- Fix some strange aliasing issues when zoomed out (could be rasterization issue)

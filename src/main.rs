@@ -27,6 +27,8 @@ fn main() -> Result<(), String> {
         font_name.clone()
     };
 
+    let debug = false; // Harcoded debug value for now
+
     let file_path = format!("fonts/{}", font_name);
     let bytes = read_file_to_byte_array(&file_path);
     let mut byte_buffer = ByteBuffer::new(bytes);
@@ -82,7 +84,7 @@ fn main() -> Result<(), String> {
     let mut canvas: Canvas<Window> = window.into_canvas().build().map_err(|e| e.to_string())?;
 
     let mut event_pump = sdl_context.event_pump()?;
-    let mut app_state = AppState::new(glyphs, width, height)?;
+    let mut app_state = AppState::new(glyphs, width, height, debug)?;
 
     'running: loop {
         let mouse_state = event_pump.mouse_state();

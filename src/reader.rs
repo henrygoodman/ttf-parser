@@ -138,34 +138,34 @@ impl FontParser {
             if let Some(offsets) = glyph_offsets {
                 let start_offset = offsets[glyph_index as usize] as usize;
                 let end_offset = offsets[glyph_index as usize + 1] as usize;
-
+    
                 self.buffer.set_position(record.absolute_offset as usize + start_offset);
                 let num_contours = self.buffer.read_i16();
                 let xmin = self.buffer.read_i16();
                 let ymin = self.buffer.read_i16();
                 let xmax = self.buffer.read_i16();
                 let ymax = self.buffer.read_i16();
-
+    
                 let mut end_pts_of_contours = Vec::new();
                 if num_contours > 0 {
                     end_pts_of_contours = self.buffer.read_array::<u16>(num_contours as usize);
                 }
-
+    
                 let instruction_length = self.buffer.read_u16();
                 let _instructions = self.buffer.read_array::<u8>(instruction_length as usize);
-
+    
                 let num_points = if num_contours > 0 {
                     end_pts_of_contours[num_contours as usize - 1] + 1
                 } else {
                     0
                 };
-
+    
                 let mut flags = Vec::with_capacity(num_points as usize);
                 let mut i = 0;
                 while i < num_points {
                     let flag = self.buffer.read_u8();
                     flags.push(flag);
-
+    
                     if (flag & 0x08) != 0 {
                         let repeat_count = self.buffer.read_u8();
                         for _ in 0..repeat_count {
@@ -176,12 +176,12 @@ impl FontParser {
                         i += 1;
                     }
                 }
-
+    
                 let mut x_coordinates = Vec::with_capacity(num_points as usize);
                 let mut y_coordinates = Vec::with_capacity(num_points as usize);
                 let mut previous_x = 0;
                 let mut previous_y = 0;
-
+    
                 for &flag in &flags {
                     let x = if (flag & 0x02) != 0 {
                         let dx = self.buffer.read_u8() as i16;
@@ -200,7 +200,7 @@ impl FontParser {
                     x_coordinates.push(x);
                     previous_x = x;
                 }
-
+    
                 for &flag in &flags {
                     let y = if (flag & 0x04) != 0 {
                         let dy = self.buffer.read_u8() as i16;
@@ -219,16 +219,74 @@ impl FontParser {
                     y_coordinates.push(y);
                     previous_y = y;
                 }
-
+    
+                // Process points for debugging
+                let mut processed_points = Vec::new();
+                let mut adjusted_end_pts_of_contours = end_pts_of_contours.clone();
+                let mut i = 0;
+                let mut contour_index = 0;
+    
+                while i < x_coordinates.len() {
+                    let x = x_coordinates[i];
+                    let y = y_coordinates[i];
+                    processed_points.push((x, y));
+    
+                    if (flags[i] & 1) == 0 { // If this point is off-curve
+                        let mut next_i = i + 1;
+                        if next_i >= x_coordinates.len() || next_i > end_pts_of_contours[contour_index] as usize {
+                            next_i = if contour_index > 0 { (end_pts_of_contours[contour_index - 1] + 1).into() } else { 0 };
+                        }
+    
+                        if (flags[next_i] & 1) == 0 { // Next point is also off-curve
+                            let mid_point = ((x + x_coordinates[next_i]) / 2, (y + y_coordinates[next_i]) / 2);
+                            processed_points.push(mid_point);
+                            // Increment the end point indices for the current and subsequent contours
+                            for j in contour_index..end_pts_of_contours.len() {
+                                adjusted_end_pts_of_contours[j] += 1;
+                            }
+                        }
+                    } else {
+                        // Check for consecutive on-curve points
+                        let mut next_i = i + 1;
+                        if next_i >= x_coordinates.len() || next_i > end_pts_of_contours[contour_index] as usize {
+                            // Loop back to the first point of the current contour
+                            next_i = if contour_index > 0 { (end_pts_of_contours[contour_index - 1] + 1).into() } else { 0 };
+                        }
+    
+                        if (flags[next_i] & 1) != 0 { // Next point is also on-curve
+                            let mid_point = ((x + x_coordinates[next_i]) / 2, (y + y_coordinates[next_i]) / 2);
+                            processed_points.push(mid_point);
+                            // Increment the end point indices for the current and subsequent contours
+                            for j in contour_index..end_pts_of_contours.len() {
+                                adjusted_end_pts_of_contours[j] += 1;
+                            }
+                        }
+                    }
+    
+                    i += 1;
+    
+                    if contour_index < end_pts_of_contours.len() && i > end_pts_of_contours[contour_index] as usize {
+                        contour_index += 1;
+                    }
+                }
+    
+                // Do not add the first point again to close the contour if it already exists
+                if num_contours > 0 && processed_points.last() == Some(&processed_points[0]) {
+                    processed_points.pop();
+                    adjusted_end_pts_of_contours[contour_index - 1] -= 1;
+                }
+    
                 Some(Glyph {
                     num_contours,
                     xmin,
                     ymin,
                     xmax,
                     ymax,
-                    end_pts_of_contours,
+                    end_pts_of_contours: adjusted_end_pts_of_contours,
                     x_coordinates,
                     y_coordinates,
+                    flags,
+                    processed_points, // Add processed points to Glyph
                 })
             } else {
                 None
@@ -236,7 +294,8 @@ impl FontParser {
         } else {
             None
         }
-    }
+    }    
+    
 }
 
 fn read_loca_table_16(buffer: &mut ByteBuffer, num_glyphs: u16) -> Vec<u32> {
