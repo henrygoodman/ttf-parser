@@ -20,45 +20,9 @@ use sdl2::Sdl;
 use clap::{App, Arg};
 
 fn main() -> Result<(), String> {
-    let matches = App::new("Glyph Renderer")
-        .version("1.0")
-        .author("Author Name <author@example.com>")
-        .arg(
-            Arg::new("print-all-glyphs")
-                .short('p')
-                .long("print-all-glyphs")
-                .takes_value(false)
-                .help("Draw all available glyphs"),
-        )
-        .arg(Arg::new("debug")
-            .short('d')
-            .long("debug")
-            .takes_value(false)
-            .help("Enable debug visuals"),
-        )
-        .arg(
-            Arg::new("input")
-                .help("The input string to render")
-                .index(1),
-        )
-        .arg(
-            Arg::new("font")
-                .short('f')
-                .long("font")
-                .takes_value(true)
-                .default_value("fonts/JetBrainsMono-Bold.ttf")
-                .help("Path to the font file"),
-        )
-        .get_matches();
+    let config = Config::from_args();
 
-    let outline_thickness = 2; // FIXME: Remove hardcoded
-    
-    let print_all_glyphs = matches.is_present("print-all-glyphs");
-    let debug = matches.is_present("debug");
-    let input_string = matches.value_of("input").unwrap_or("Hello, World!");
-    let font_name = matches.value_of("font").unwrap();
-    
-    let bytes = read_file_to_byte_array(&font_name);
+    let bytes = read_file_to_byte_array(&config.font_path);
     let mut byte_buffer = ByteBuffer::new(bytes);
 
     let table_records = read_table_directory(&mut byte_buffer);
@@ -91,7 +55,7 @@ fn main() -> Result<(), String> {
 
     let mut glyphs = Vec::new();
 
-    if print_all_glyphs {
+    if config.print_all_glyphs {
         let mut all_glyphs = vec![];
         for i in 0..total_glyphs {
             if let Some(glyph_data) = parser.read_glyph(&glyph_offsets, i, &hmtx_table) {
@@ -112,7 +76,7 @@ fn main() -> Result<(), String> {
         }
     } else {
         let mut glyph_indices = Vec::new();
-        for ch in input_string.chars() {
+        for ch in config.input_string.chars() {
             if let Some(glyph_index) = cmap_subtable.char_to_glyph_index(ch as u16) {
                 glyph_indices.push(glyph_index);
             }
@@ -127,7 +91,7 @@ fn main() -> Result<(), String> {
         glyphs.push(line_glyphs);
     }
 
-    let mut app_state = AppState::new(glyphs, width as i16, height as i16, debug, outline_thickness)?;
+    let mut app_state = AppState::new(glyphs, width as i16, height as i16, config.debug, config.outline_thickness)?;
 
     'running: loop {
         let mouse_state = event_pump.mouse_state();

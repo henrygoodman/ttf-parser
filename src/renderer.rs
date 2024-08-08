@@ -3,7 +3,7 @@ use sdl2::render::Canvas;
 use sdl2::video::Window;
 use sdl2::pixels::Color;
 
-use crate::glyph::Glyph;
+use crate::glyph::{Glyph, GlyphCache};
 
 pub struct AppState {
     glyphs: Vec<Vec<Glyph>>,
@@ -14,6 +14,7 @@ pub struct AppState {
     offset: (f64, f64),
     line_height: f64,
     outline_thickness: i32, // Outline thickness parameter
+    glyph_cache: GlyphCache, // Glyph cache
 }
 
 struct Dimensions {
@@ -32,6 +33,7 @@ impl AppState {
             offset: (0.0, 0.0),
             line_height: 1500.0, // Default line height
             outline_thickness, // Outline thickness parameter
+            glyph_cache: GlyphCache::new(),
         })
     }
 
@@ -50,6 +52,13 @@ impl AppState {
 
         self.offset.0 += dx;
         self.offset.1 += dy;
+
+        // Update the cache with the new zoom level
+        for line in &self.glyphs {
+            for glyph in line {
+                self.glyph_cache.update_cache(glyph, self.zoom_level);
+            }
+        }
     }
 
     pub fn start_drag(&mut self, x: i32, y: i32) {
@@ -78,7 +87,7 @@ impl AppState {
         (min_x, max_x, min_y, max_y)
     }
 
-    fn draw_bezier(&self, canvas: &mut Canvas<Window>, points: &[(i16, i16)], color: Color) -> Result<(), String> {
+    fn draw_bezier<T: sdl2::render::RenderTarget>(&self, canvas: &mut Canvas<T>, points: &[(i16, i16)], color: Color) -> Result<(), String> {
         if points.len() < 3 {
             return Err("Need at least 3 points to draw a quadratic Bézier curve".into());
         }
@@ -95,6 +104,7 @@ impl AppState {
 
             // Draw circles at each control point for debugging
             if self.debug {
+                // println!("Points {:?}", points);
                 canvas.filled_circle(vx[0] as i16, vy[0] as i16, (10.0 * self.zoom_level) as i16, Color::RGB(255, 0, 0))?;
                 canvas.filled_circle(vx[1] as i16, vy[1] as i16, (5.0 * self.zoom_level) as i16, Color::RGB(0, 255, 0))?;
                 canvas.filled_circle(vx[2] as i16, vy[2] as i16, (2.0 * self.zoom_level) as i16, Color::RGB(0, 0, 255))?;
@@ -124,11 +134,6 @@ impl AppState {
             max_y as f64
         }).max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(0.0);
 
-        let fixed_width = self.glyphs.iter().flatten().map(|glyph| {
-            let (min_x, max_x, _, _) = self.get_glyph_bounding_box(glyph);
-            (max_x - min_x) as f64
-        }).max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(0.0);
-
         let mut pen_y = self.offset.1;
         for line in &self.glyphs {
             let mut pen_x = self.offset.0;
@@ -136,36 +141,47 @@ impl AppState {
             for glyph in line {
                 let (min_x, max_x, min_y, max_y) = self.get_glyph_bounding_box(glyph);
 
-                let glyph_width = (max_x - min_x) as f64;
-                let glyph_height = (max_y - min_y) as f64;
-
                 let baseline = pen_y + (max_y_coord - max_y as f64) * self.zoom_level;
 
                 if self.debug {
-                    println!("Glyph dimensions: width = {}, height = {}", glyph_width, glyph_height);
-                    println!("Glyph position: pen_x = {}, baseline = {}", pen_x, baseline);
-                    println!("{:?}", glyph);
+                    // println!("Glyph dimensions: width = {}, height = {}", max_x - min_x, max_y - min_y);
+                    // println!("Glyph position: pen_x = {}, baseline = {}", pen_x, baseline);
+                    // println!("{:?}", glyph);
                 }
 
-                let scale = |x: i16| -> i16 { (x as f64 * self.zoom_level) as i16 };
-                let flip_y = |y: i16| -> i16 { (y as f64 * self.zoom_level) as i16 };
-
-                let mut points = Vec::new();
-                for &(x, y) in &glyph.processed_points {
-                    let scaled_x = (pen_x + scale(x - min_x) as f64) as i16;
-                    let scaled_y = (baseline - flip_y(y - max_y) as f64) as i16;
-                    points.push((scaled_x, scaled_y));
+                if self.glyph_cache.get_cached_data(glyph.glyph_index).is_none() {
+                    self.glyph_cache.update_cache(glyph, self.zoom_level);
                 }
+
+                let cached_data = self.glyph_cache.get_cached_data(glyph.glyph_index).unwrap();
+                let scaled_points = &cached_data.scaled_points;
+                let bounding_box = cached_data.bounding_box;
+
+                let transformed_points: Vec<(i16, i16)> = scaled_points.iter()
+                    .map(|&(x, y)| ((x as f64 + pen_x) as i16, (baseline - y as f64) as i16))
+                    .collect();
 
                 let mut start = 0;
                 for (contour_index, &end) in glyph.end_pts_of_contours.iter().enumerate() {
                     assert!(
-                        usize::from(end) < points.len(),
-                        "Assertion failed: end={} < points.len()={}", usize::from(end), points.len()
+                        usize::from(end) < transformed_points.len(),
+                        "Assertion failed: end={} < points.len()={}", usize::from(end), transformed_points.len()
                     );
                     let color = if self.debug { colors[contour_index % colors.len()] } else { Color::RGB(255, 255, 255) };
-                    self.draw_bezier(canvas, &points[start as usize..=end as usize], color)?;
+                    self.draw_bezier(canvas, &transformed_points[start as usize..=end as usize], color)?;
                     start = end + 1;
+                }
+
+                let dst_rect = sdl2::rect::Rect::new(
+                    pen_x as i32,
+                    baseline as i32,
+                    (bounding_box.1 - bounding_box.0) as u32,
+                    (bounding_box.3 - bounding_box.2) as u32
+                );
+
+                if self.debug {
+                    canvas.set_draw_color(Color::RGB(255, 0, 0));
+                    canvas.draw_rect(dst_rect).expect("Failed to draw rect outline");
                 }
 
                 pen_x += glyph.advance_width * self.zoom_level;

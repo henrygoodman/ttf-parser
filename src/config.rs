@@ -12,7 +12,7 @@ impl Config {
     pub fn from_args() -> Self {
         let matches = App::new("Glyph Renderer")
             .version("1.0")
-            .author("Henry Goodman <henrygoodman114@gmail.com")
+            .author("Henry Goodman <henrygoodman114@gmail.com>")
             .arg(
                 Arg::new("print-all-glyphs")
                     .short('p')

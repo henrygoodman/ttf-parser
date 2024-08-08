@@ -67,7 +67,6 @@ impl FontParser {
                 left_side_bearings.push(buffer.read_i16());
             }
 
-            println!("Adv: {:?}", advance_widths);
             HmtxTable {
                 advance_widths,
                 left_side_bearings,
@@ -318,6 +317,7 @@ impl FontParser {
                 let advance_width = hmtx_table.advance_widths[glyph_index as usize] as f64;
     
                 Some(Glyph {
+                    glyph_index,
                     num_contours,
                     xmin,
                     ymin,
@@ -333,7 +333,7 @@ impl FontParser {
             } else {
                 // Compound glyph
                 let mut components = Vec::new();
-                while true {
+                loop {
                     let flags = self.buffer.read_u16();
                     let component_index = self.buffer.read_u16();
     
@@ -377,6 +377,7 @@ impl FontParser {
                 });
     
                 combined_glyph.map(|glyph| Glyph {
+                    glyph_index,
                     num_contours: glyph.end_pts_of_contours.len() as i16,
                     xmin,
                     ymin,
