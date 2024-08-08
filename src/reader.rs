@@ -67,6 +67,7 @@ impl FontParser {
                 left_side_bearings.push(buffer.read_i16());
             }
 
+            println!("Adv: {:?}", advance_widths);
             HmtxTable {
                 advance_widths,
                 left_side_bearings,

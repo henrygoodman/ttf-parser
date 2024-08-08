@@ -36,3 +36,5 @@
 - Improve spacing
 - Render glyphs totally (filling inside)
 - Fix some strange aliasing issues when zoomed out (could be rasterization issue)
+- Handle non-mono fonts
+- Other bugs that may present themselves!
