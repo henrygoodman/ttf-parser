@@ -159,6 +159,10 @@ impl AppState {
 
                 let mut start = 0;
                 for (contour_index, &end) in glyph.end_pts_of_contours.iter().enumerate() {
+                    assert!(
+                        usize::from(end) < points.len(),
+                        "Assertion failed: end={} < points.len()={}", usize::from(end), points.len()
+                    );
                     let color = if self.debug { colors[contour_index % colors.len()] } else { Color::RGB(255, 255, 255) };
                     self.draw_bezier(canvas, &points[start as usize..=end as usize], color)?;
                     start = end + 1;

@@ -167,19 +167,23 @@ impl FontParser {
         }
     }
 
-    pub fn read_glyph(&mut self, glyph_offsets: Option<Vec<u32>>, glyph_index: u16, hmtx_table: &HmtxTable) -> Option<Glyph> {
+    pub fn read_glyph(&mut self, glyph_offsets: &Vec<u32>, glyph_index: u16, hmtx_table: &HmtxTable) -> Option<Glyph> {
+        if glyph_index as usize >= glyph_offsets.len() - 1 {
+            return None; // Glyph index out of bounds
+        }
         if let Some(record) = self.table_records.iter().find(|&record| &record.tag == TableName::Glyf.as_tag()) {
-            if let Some(offsets) = glyph_offsets {
-                let start_offset = offsets[glyph_index as usize] as usize;
-                let end_offset = offsets[glyph_index as usize + 1] as usize;
+            let start_offset = glyph_offsets[glyph_index as usize] as usize;
+            let end_offset = glyph_offsets[glyph_index as usize + 1] as usize;
     
-                self.buffer.set_position(record.absolute_offset as usize + start_offset);
-                let num_contours = self.buffer.read_i16();
-                let xmin = self.buffer.read_i16();
-                let ymin = self.buffer.read_i16();
-                let xmax = self.buffer.read_i16();
-                let ymax = self.buffer.read_i16();
+            self.buffer.set_position(record.absolute_offset as usize + start_offset);
+            let num_contours = self.buffer.read_i16();
+            let xmin = self.buffer.read_i16();
+            let ymin = self.buffer.read_i16();
+            let xmax = self.buffer.read_i16();
+            let ymax = self.buffer.read_i16();
     
+            if num_contours >= 0 {
+                // Simple glyph
                 let mut end_pts_of_contours = Vec::new();
                 if num_contours > 0 {
                     end_pts_of_contours = self.buffer.read_array::<u16>(num_contours as usize);
@@ -326,12 +330,70 @@ impl FontParser {
                     advance_width,
                 })
             } else {
-                None
+                // Compound glyph
+                let mut components = Vec::new();
+                while true {
+                    let flags = self.buffer.read_u16();
+                    let component_index = self.buffer.read_u16();
+    
+                    let arg1 = if (flags & 0x0001) != 0 {
+                        self.buffer.read_i16() as f64
+                    } else {
+                        self.buffer.read_u8() as f64
+                    };
+    
+                    let arg2 = if (flags & 0x0001) != 0 {
+                        self.buffer.read_i16() as f64
+                    } else {
+                        self.buffer.read_u8() as f64
+                    };
+    
+                    let (dx, dy) = if (flags & 0x0002) != 0 {
+                        (arg1, arg2)
+                    } else {
+                        (0.0, 0.0)
+                    };
+    
+                    if let Some(mut glyph_data) = self.read_glyph(glyph_offsets, component_index, hmtx_table) {
+                        for i in 0..glyph_data.x_coordinates.len() {
+                            glyph_data.x_coordinates[i] += dx as i16;
+                            glyph_data.y_coordinates[i] += dy as i16;
+                        }
+                        components.push(glyph_data);
+                    }
+    
+                    if (flags & 0x0020) == 0 {
+                        break;
+                    }
+                }
+    
+                // Combine the components into one glyph
+                let combined_glyph = components.into_iter().reduce(|mut acc, mut glyph| {
+                    acc.x_coordinates.append(&mut glyph.x_coordinates);
+                    acc.y_coordinates.append(&mut glyph.y_coordinates);
+                    acc.end_pts_of_contours.append(&mut glyph.end_pts_of_contours);
+                    acc
+                });
+    
+                combined_glyph.map(|glyph| Glyph {
+                    num_contours: glyph.end_pts_of_contours.len() as i16,
+                    xmin,
+                    ymin,
+                    xmax,
+                    ymax,
+                    end_pts_of_contours: glyph.end_pts_of_contours,
+                    x_coordinates: glyph.x_coordinates,
+                    y_coordinates: glyph.y_coordinates,
+                    flags: vec![],              // Compound glyphs do not have flags
+                    processed_points: vec![],   // This can be populated if needed
+                    advance_width: hmtx_table.advance_widths[glyph_index as usize] as f64,
+                })
             }
         } else {
             None
         }
     }
+    
 }
 
 fn read_loca_table_16(buffer: &mut ByteBuffer, num_glyphs: u16) -> Vec<u32> {
