@@ -1,6 +1,6 @@
 use crate::buffer::ByteBuffer;
 use crate::glyph::Glyph;
-use crate::table::{TableRecord, EncodingRecord, TableName, MaxpTable, HeadTable, CmapTable, CmapFormat4};
+use crate::table::{TableRecord, EncodingRecord, TableName, MaxpTable, HeadTable, HheaTable, HmtxTable, CmapTable, CmapFormat4};
 use crate::utils::get_platform_id;
 
 pub struct FontParser {
@@ -37,6 +37,40 @@ impl FontParser {
             assert_eq!(magic_number, 0x5F0F3CF5);
             buffer.skip_bytes(2 + 2 + 8 + 8 + 2 + 2 + 2 + 2 + 2 + 2 + 2);
             HeadTable { index_to_loc_format: buffer.read_i16() }
+        }))
+    }
+
+    pub fn read_hhea_table(&mut self) -> Option<HheaTable> {
+        self.read_table(TableName::Hhea, Box::new(|buffer| {
+            buffer.skip_bytes(34); // Skip to numOfLongHorMetrics
+            let num_h_metrics = buffer.read_u16();
+            HheaTable {
+                num_h_metrics,
+            }
+        }))
+    }
+
+    pub fn read_hmtx_table(&mut self, num_glyphs: u16, num_h_metrics: u16) -> Option<HmtxTable> {
+        self.read_table(TableName::Hmtx, Box::new(move |buffer| {
+            let mut advance_widths = Vec::with_capacity(num_h_metrics as usize);
+            let mut left_side_bearings = Vec::with_capacity(num_glyphs as usize);
+            
+            for _ in 0..num_h_metrics {
+                advance_widths.push(buffer.read_u16());
+                left_side_bearings.push(buffer.read_i16());
+            }
+            
+            // For glyphs that do not have an advance width entry, use the last advance width
+            let last_advance_width = *advance_widths.last().unwrap();
+            for _ in num_h_metrics..num_glyphs {
+                advance_widths.push(last_advance_width);
+                left_side_bearings.push(buffer.read_i16());
+            }
+
+            HmtxTable {
+                advance_widths,
+                left_side_bearings,
+            }
         }))
     }
 
@@ -133,7 +167,7 @@ impl FontParser {
         }
     }
 
-    pub fn read_glyph(&mut self, glyph_offsets: Option<Vec<u32>>, glyph_index: u16) -> Option<Glyph> {
+    pub fn read_glyph(&mut self, glyph_offsets: Option<Vec<u32>>, glyph_index: u16, hmtx_table: &HmtxTable) -> Option<Glyph> {
         if let Some(record) = self.table_records.iter().find(|&record| &record.tag == TableName::Glyf.as_tag()) {
             if let Some(offsets) = glyph_offsets {
                 let start_offset = offsets[glyph_index as usize] as usize;
@@ -276,6 +310,8 @@ impl FontParser {
                     adjusted_end_pts_of_contours[contour_index - 1] -= 1;
                 }
     
+                let advance_width = hmtx_table.advance_widths[glyph_index as usize] as f64;
+    
                 Some(Glyph {
                     num_contours,
                     xmin,
@@ -287,6 +323,7 @@ impl FontParser {
                     y_coordinates,
                     flags,
                     processed_points, // Add processed points to Glyph
+                    advance_width,
                 })
             } else {
                 None
@@ -294,8 +331,7 @@ impl FontParser {
         } else {
             None
         }
-    }    
-    
+    }
 }
 
 fn read_loca_table_16(buffer: &mut ByteBuffer, num_glyphs: u16) -> Vec<u32> {

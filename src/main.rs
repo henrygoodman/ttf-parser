@@ -4,7 +4,9 @@ mod reader;
 mod renderer;
 mod table;
 mod utils;
+mod config;
 
+use config::Config;
 use reader::{FontParser, read_table_directory};
 use utils::read_file_to_byte_array;
 use buffer::ByteBuffer;
@@ -15,22 +17,11 @@ use sdl2::mouse::MouseButton;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
 use sdl2::Sdl;
-use std::env;
 
 fn main() -> Result<(), String> {
-    // Read the input string from command line arguments
-    let args: Vec<String> = env::args().collect();
-    let font_name = String::from("JetBrainsMono-Regular.ttf");
-    let input_string = if args.len() > 1 {
-        args[1].clone()
-    } else {
-        font_name.clone()
-    };
+    let config = Config::from_args();
 
-    let debug = false; // Harcoded debug value for now
-
-    let file_path = format!("fonts/{}", font_name);
-    let bytes = read_file_to_byte_array(&file_path);
+    let bytes = read_file_to_byte_array(&config.font_path);
     let mut byte_buffer = ByteBuffer::new(bytes);
 
     let table_records = read_table_directory(&mut byte_buffer);
@@ -39,43 +30,19 @@ fn main() -> Result<(), String> {
     let head_table = parser.read_head_table().expect("head table not found");
     let maxp_table = parser.read_maxp_table().expect("maxp table not found");
     let total_glyphs = maxp_table.num_glyphs;
+    let hhea_table = parser.read_hhea_table().expect("hhea table not found");
+    let hmtx_table = parser.read_hmtx_table(total_glyphs, hhea_table.num_h_metrics).expect("hmtx table not found");
     let glyph_offsets = parser.read_glyph_offsets(total_glyphs, head_table.index_to_loc_format);
     let cmap_table = parser.read_cmap_table().expect("cmap table not found");
     let cmap_subtable = parser.read_cmap_subtable(&cmap_table).expect("cmap subtable not found");
 
-    let mut lines = vec![];
-    let mut current_line = vec![];
-    for ch in input_string.chars() {
-        if ch == '\n' {
-            lines.push(current_line);
-            current_line = vec![];
-        } else if let Some(glyph_index) = cmap_subtable.char_to_glyph_index(ch as u16) {
-            current_line.push(glyph_index);
-        }
-    }
-    if !current_line.is_empty() {
-        lines.push(current_line);
-    }
-
-    // Generate glyphs for the renderer
-    let mut glyphs = vec![];
-    for line in lines {
-        let mut glyph_line = vec![];
-        for glyph_index in line {
-            if let Some(glyph_data) = parser.read_glyph(glyph_offsets.clone(), glyph_index) {
-                glyph_line.push(glyph_data);
-            }
-        }
-        glyphs.push(glyph_line);
-    }
-
     let sdl_context: Sdl = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
 
-    let (width, height) = (800 as i16, 800 as i16);
+    let (width, height) = (800, 800);
 
     let window: Window = video_subsystem
-        .window("Glyph Renderer", width as u32, height as u32)
+        .window("Glyph Renderer", width, height)
         .position_centered()
         .resizable()
         .build()
@@ -84,7 +51,46 @@ fn main() -> Result<(), String> {
     let mut canvas: Canvas<Window> = window.into_canvas().build().map_err(|e| e.to_string())?;
 
     let mut event_pump = sdl_context.event_pump()?;
-    let mut app_state = AppState::new(glyphs, width, height, debug)?;
+
+    let mut glyphs = Vec::new();
+
+    if config.print_all_glyphs {
+        let mut all_glyphs = vec![];
+        for i in 0..total_glyphs {
+            if let Some(glyph_data) = parser.read_glyph(glyph_offsets.clone(), i, &hmtx_table) {
+                all_glyphs.push(glyph_data);
+            }
+        }
+        // Create 2D vector of glyphs with 15 glyphs per line
+        let mut line_glyphs = vec![];
+        for (i, glyph) in all_glyphs.into_iter().enumerate() {
+            if i % 15 == 0 && !line_glyphs.is_empty() {
+                glyphs.push(line_glyphs);
+                line_glyphs = vec![];
+            }
+            line_glyphs.push(glyph);
+        }
+        if !line_glyphs.is_empty() {
+            glyphs.push(line_glyphs);
+        }
+    } else {
+        let mut glyph_indices = Vec::new();
+        for ch in config.input_string.chars() {
+            if let Some(glyph_index) = cmap_subtable.char_to_glyph_index(ch as u16) {
+                glyph_indices.push(glyph_index);
+            }
+        }
+
+        let mut line_glyphs = Vec::new();
+        for glyph_index in glyph_indices {
+            if let Some(glyph_data) = parser.read_glyph(glyph_offsets.clone(), glyph_index, &hmtx_table) {
+                line_glyphs.push(glyph_data);
+            }
+        }
+        glyphs.push(line_glyphs);
+    }
+
+    let mut app_state = AppState::new(glyphs, width as i16, height as i16, config.debug, config.outline_thickness)?;
 
     'running: loop {
         let mouse_state = event_pump.mouse_state();

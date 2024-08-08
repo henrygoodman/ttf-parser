@@ -7,6 +7,7 @@ edition = "2021"
 byteorder = "1.4"
 rand = "0.8"
 sys-info = "0.8"
+clap = { version = "3.0", features = ["derive"] }
 
 [dependencies.sdl2]
 version = "0.35.2"

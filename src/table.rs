@@ -3,6 +3,8 @@ pub enum TableName {
     Maxp,
     Cmap,
     Head,
+    Hhea,
+    Hmtx,
     Loca,
     Glyf,
 }
@@ -13,6 +15,8 @@ impl TableName {
             TableName::Maxp => b"maxp",
             TableName::Cmap => b"cmap",
             TableName::Head => b"head",
+            TableName::Hhea => b"hhea",
+            TableName::Hmtx => b"hmtx",
             TableName::Loca => b"loca",
             TableName::Glyf => b"glyf",
         }
@@ -33,6 +37,17 @@ pub struct MaxpTable {
 #[derive(Debug)]
 pub struct HeadTable {
     pub index_to_loc_format: i16,
+}
+
+#[derive(Debug)]
+pub struct HheaTable {
+    pub num_h_metrics: u16,
+}
+
+#[derive(Debug)]
+pub struct HmtxTable {
+    pub advance_widths: Vec<u16>,
+    pub left_side_bearings: Vec<i16>,
 }
 
 #[derive(Debug)]
@@ -66,21 +81,16 @@ pub struct CmapFormat4 {
 
 impl CmapFormat4 {
     pub fn char_to_glyph_index(&self, char_code: u16) -> Option<u16> {
-        let seg_count = (self.seg_count_x2 / 2) as usize;
-
-        for i in 0..seg_count {
+        for i in 0..self.end_code.len() {
             if char_code >= self.start_code[i] && char_code <= self.end_code[i] {
                 if self.id_range_offset[i] == 0 {
-                    let glyph_index = ((char_code as i32 + self.id_delta[i] as i32) % 65536) as u16;
-                    return Some(glyph_index);
+                    return Some((((char_code as i32 + self.id_delta[i] as i32) % 65536) & 0xFFFF) as u16);
                 } else {
-                    let idx = ((self.id_range_offset[i] / 2) as usize
-                        + (char_code - self.start_code[i]) as usize
-                        + i) - seg_count;
-                    return Some(self.glyph_id_array.get(idx).cloned().unwrap_or(0));
+                    let offset = (self.id_range_offset[i] as usize / 2 + (char_code - self.start_code[i]) as usize - (self.end_code.len() - i)) as usize;
+                    return Some(self.glyph_id_array[offset]);
                 }
             }
         }
         None
-    }
+    }    
 }
