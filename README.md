@@ -1,6 +1,6 @@
 # ttf-parser
 
-![](img/bezier_far.png)
+![](img/clean_bezier.png)
 
 
 ### Personal project to learn ttf parsing in Rust
